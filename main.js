@@ -1,4 +1,3 @@
-// main.js
 import { chromium } from '@playwright/test';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -6,6 +5,7 @@ import * as log from './log.js';
 
 import { waitLoginAcrossPages } from './auth.js';
 import { installSnipeSchedulerOverlay } from './snipeOverlay.js';
+import { patchFncheck } from './fnpatch.js';   // 🔹 추가
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -28,6 +28,7 @@ async function main() {
 
     try {
         await installSnipeSchedulerOverlay(context);
+        await patchFncheck(context);   // 🔹 추가
 
         const page = await context.newPage();
         log.addLog('인터파크 메인을 엽니다. 브라우저에서 직접 로그인하세요.');
