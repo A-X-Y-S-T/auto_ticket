@@ -4,7 +4,7 @@
 // - 시간 입력 H/M/S/ms 분리
 // - 파생 페이지(예매/좌석/결제 등)에서는 오버레이 표시 안 함
 // - 우측 여백 제거(오른쪽 모서리에 딱 붙음), 드래그로 위치 이동 가능
-// - 좌표-잠금 클릭(해당 좌표 위/조상 매칭만) + 리로드 후 스크롤 복원
+// - 좌표만 찍고 그 좌표를 반복 클릭 + 리로드 후 스크롤 복원
 // - 리로드해도 루프 끊기지 않도록 상태 저장/복원
 
 export async function installSnipeSchedulerOverlay(context) {
@@ -35,7 +35,6 @@ function ensureOverlayScript() { ensureOverlayRuntime(); }
 
 /** 실제 런타임 주입 */
 function ensureOverlayRuntime() {
-    // 파생 페이지(예매/좌석/결제/주문/마이/큐/게이트 등)는 표시 안 함
     const HIDE_RE = /(Booking|Book|Seat|Reserve|Payment|Pay|Order|Cart|Check|My(Page|Ticket)|Gate|Queue|Popup)/i;
     if (HIDE_RE.test(location.href)) return;
 
@@ -80,8 +79,6 @@ function ensureOverlayRuntime() {
     #snipeOverlay .status{ margin-top:6px; font-size:11px; color:#bfe6bf; word-break:break-word; }
     #snipeOverlay .danger{ color:#ffbdbd }
     #snipeOverlay .hint{ font-size:10px; color:#9eb3d6; margin-top:6px; line-height:1.3 }
-    #snipeOverlay .chkrow{ display:flex; align-items:center; gap:6px; margin-top:4px; }
-    #snipeOverlay .chkrow input[type="checkbox"]{ width:auto }
     #snipeMarker{
       position:fixed; width:9px; height:9px; border-radius:50%;
       background:#6ca0ff; border:2px solid #fff; pointer-events:none;
@@ -119,7 +116,7 @@ function ensureOverlayRuntime() {
     </div>
 
     <label>선택자(선택)</label>
-    <input id="snSelector" placeholder="예: a.BtnColor_Y.btn1">
+    <input id="snSelector" placeholder="예: a.BtnColor_Y.btn1" disabled style="opacity:.5" title="좌표 전용 모드에서는 사용하지 않습니다.">
 
     <div class="grid2">
       <div><label>X</label><input id="snX" type="number" step="1"></div>
@@ -128,7 +125,7 @@ function ensureOverlayRuntime() {
 
     <div class="grid3">
       <button id="snPick" class="btn secondary">좌표지정</button>
-      <button id="snTestSel" class="btn secondary">테스트</button>
+      <button id="snTestSel" class="btn secondary" disabled>테스트</button>
       <button id="snClear" class="btn secondary">지우기</button>
     </div>
 
@@ -136,7 +133,7 @@ function ensureOverlayRuntime() {
     <button id="snStop" class="btn stop" style="display:none;">중지</button>
 
     <div id="snStatus" class="status"></div>
-    <div class="hint">헤더 드래그로 위치 이동. 예매 파생(좌석/결제 등) 페이지에는 패널이 자동 숨김.</div>
+    <div class="hint">지금 모드는 좌표 전용입니다. 해당 좌표 위치를 반복 클릭하며, 변화 감지 시 종료합니다.</div>
   `;
     document.documentElement.appendChild(ui);
 
@@ -209,7 +206,7 @@ function ensureOverlayRuntime() {
     })();
 
     // ── 로컬 저장/복원 ──
-    const persistIds = ['snH', 'snM', 'snS', 'snMS', 'snLead', 'snReload', 'snJitter', 'snWindow', 'snSelector', 'snX', 'snY', 'snPostPause'];
+    const persistIds = ['snH', 'snM', 'snS', 'snMS', 'snLead', 'snReload', 'snJitter', 'snWindow', 'snX', 'snY', 'snPostPause'];
     persistIds.forEach(k => {
         const v = localStorage.getItem(k); if (v != null) $('#' + k).value = v;
         $('#' + k).addEventListener('change', () => localStorage.setItem(k, $('#' + k).value));
@@ -241,16 +238,6 @@ function ensureOverlayRuntime() {
         localStorage.setItem('snX', String(x));
         localStorage.setItem('snY', String(y));
         setMarker(x, y, true);
-
-        // 셀렉터 추정 (없을 때만)
-        const el = document.elementFromPoint(e.clientX, e.clientY);
-        if (el && !$('#snSelector').value) {
-            const classes = (el.className && typeof el.className === 'string') ? el.className.trim().split(/\s+/).filter(Boolean) : [];
-            const tag = el.tagName?.toLowerCase() || 'div';
-            const guess = classes.length ? `${tag}.${classes.join('.')}` : tag;
-            $('#snSelector').value = guess;
-            localStorage.setItem('snSelector', guess);
-        }
         status.textContent = `좌표 저장됨: (${x}, ${y})`;
     }, true);
 
@@ -277,99 +264,8 @@ function ensureOverlayRuntime() {
         return Math.max(0, Math.round(ms + r));
     }
 
-    // 클릭 유틸
-    function isVisible(el) {
-        if (!el) return false;
-        const cs = getComputedStyle(el), rt = el.getBoundingClientRect();
-        return cs.display !== 'none' && cs.visibility !== 'hidden' && rt.width > 1 && rt.height > 1;
-    }
-
-    function isDisabledLike(el) {
-        if (!el) return true;
-
-        // 1) 조상까지 포괄적으로 disabled 속성/aria 상태/disabled 계열 클래스 검사
-        const disabledAncestor = el.closest([
-            '[disabled]',
-            '[aria-disabled="true"]',
-            '[data-disabled="true"]',
-            '.disabled',
-            '.is-disabled',
-            '.btn-disabled',
-            '.button--disabled',
-            '.locked',
-            '.blocked',
-            '.unavailable',
-            '.soldout',
-            '.sold-out'
-        ].join(','));
-        if (disabledAncestor) return true;
-
-        // 2) 스타일 기반 차단
-        const cs = getComputedStyle(el);
-        if (cs.pointerEvents === 'none') return true;
-        if (cs.visibility === 'hidden' || cs.display === 'none') return true;
-        if (cs.cursor === 'not-allowed') return true;
-        const op = parseFloat(cs.opacity || '1');
-        if (isFinite(op) && op < 0.05) return true;
-
-        // 3) 텍스트 기반
-        const txt = (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim();
-        if (/(판매예정|대기|준비중|예약불가|품절|매진|Closed|Unavailable|Coming Soon|Not Available)/i.test(txt)) return true;
-
-        // 4) 네이티브 form 요소의 disabled
-        if ((el instanceof HTMLButtonElement
-            || el instanceof HTMLInputElement
-            || el instanceof HTMLSelectElement
-            || el instanceof HTMLTextAreaElement) && el.disabled) return true;
-
-        return false;
-    }
-
+    // 좌표 클릭 (플래이‌ر라이트 있으면 물리 클릭)
     function flash(el) { if (!el) return; el.classList.add('__snipe_flash'); setTimeout(() => el.classList.remove('__snipe_flash'), 400); }
-
-    // 좌표 지점에서 조상으로 올라가며 선택자 매칭(활성/가시성 포함)
-    function matchSelectorAtPoint(sel, x, y) {
-        if (!isFinite(+x) || !isFinite(+y)) return null;
-        let n = document.elementFromPoint(+x, +y);
-        while (n && n !== document.documentElement) {
-            if (n.matches && n.matches(sel) && isVisible(n) && !isDisabledLike(n)) return n;
-            n = n.parentElement;
-        }
-        return null;
-    }
-
-    // 힌트 좌표 기반 일반 선택자 해석(활성/가시성 필터)
-    const elemCenter = (el) => { const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; };
-    const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
-    function resolveElementBySelector(sel, hintX, hintY) {
-        let nodes = [];
-        try { nodes = Array.from(document.querySelectorAll(sel)); } catch { return null; }
-        nodes = nodes.filter(n => isVisible(n) && !isDisabledLike(n));
-        if (!nodes.length) return null;
-        if (isFinite(+hintX) && isFinite(+hintY)) {
-            const hint = { x: +hintX, y: +hintY };
-            nodes.sort((a, b) => distance(elemCenter(a), hint) - distance(elemCenter(b), hint));
-        }
-        return nodes[0];
-    }
-
-    async function clickBySelector(sel, hintX, hintY) {
-        let el = null;
-        const locked = isFinite(+hintX) && isFinite(+hintY);
-        if (locked) {
-            // 좌표-잠금: 그 좌표 위(조상 포함)에서 sel 매칭되는 활성 요소만
-            el = matchSelectorAtPoint(sel, +hintX, +hintY);
-            if (!el) return false; // 매칭 실패시 절대 클릭 안함
-        } else {
-            el = resolveElementBySelector(sel, hintX, hintY);
-            if (!el) return false;
-        }
-        el.scrollIntoView({ block: 'center' });
-        flash(el);
-        try { el.click(); return true; } catch { }
-        try { el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); return true; } catch { return false; }
-    }
-
     async function clickByCoords(x, y) {
         if (!isFinite(+x) || !isFinite(+y)) return false;
         try { await window._playwright_clickAt?.(+x, +y); return true; }
@@ -382,46 +278,23 @@ function ensureOverlayRuntime() {
         }
     }
 
-    // 좌표 지점에서 선택자 매칭 상태를 판정: active | inactive | notfound
-    function checkStateAtPoint(sel, x, y) {
-        if (!isFinite(+x) || !isFinite(+y)) return 'notfound';
-        let n = document.elementFromPoint(+x, +y);
-        while (n && n !== document.documentElement) {
-            if (n.matches && n.matches(sel)) {
-                if (!isVisible(n) || isDisabledLike(n)) return 'inactive';
-                return 'active';
-            }
-            n = n.parentElement;
-        }
-        return 'notfound';
-    }
-
     // ── 루프 상태 저장/로드 ──
     const LOOP_KEY = 'snLoopStateV1';
     function saveLoopState(state) { try { localStorage.setItem(LOOP_KEY, JSON.stringify(state)); } catch { } }
     function loadLoopState() { try { return JSON.parse(localStorage.getItem(LOOP_KEY) || 'null'); } catch { return null; } }
     function clearLoopState() { try { localStorage.removeItem(LOOP_KEY); } catch { } }
 
-    // 테스트(선택자)
-    $('#snTestSel').addEventListener('click', async () => {
-        const sel = ($('#snSelector').value || '').trim();
-        const x = parseFloat($('#snX').value), y = parseFloat($('#snY').value);
-        if (!sel) { status.innerHTML = '<span class="danger">선택자를 입력하세요.</span>'; return; }
-        const ok = await clickBySelector(sel, x, y);
-        status.textContent = ok ? '테스트 클릭 성공(선택자).' : '테스트 실패(선택자).';
-    });
-
     let running = false;
     let reloadTimer = null;
 
-    // 리로드마다 1회 실행되는 이터레이션
+    // 리로드마다 1회 실행되는 이터레이션 (좌표 전용)
     async function iterateOnce(cfg) {
         if (!cfg) return;
         running = true;
         $('#snStart').style.display = 'none';
         $('#snStop').style.display = 'inline-block';
 
-        const { sel, x, y, reloadMs, jitterRt, endAt, confirmDelay } = cfg;
+        const { x, y, reloadMs, jitterRt, endAt, confirmDelay, stopAfter } = cfg;
 
         if (Date.now() > endAt) {
             status.textContent = '안전창 종료. 루프 종료.';
@@ -430,39 +303,28 @@ function ensureOverlayRuntime() {
             return;
         }
 
-        let state = 'notfound';
         try {
-            state = checkStateAtPoint(sel, x, y);
+            const prevUrl = location.href;
+            const beforeNode = document.elementFromPoint(x, y);
 
-            if (state === 'active') {
-                const prevUrl = location.href;
+            // 좌표 클릭 1회
+            const fired = await clickByCoords(x, y);
 
-                // 1) DOM 클릭
-                let fired = await clickBySelector(sel, x, y);
-                // 2) 실패 시 좌표 물리 클릭 1회
-                if (!fired) fired = await clickByCoords(x, y);
+            // 확인 대기 (짧게)
+            await new Promise(r => setTimeout(r, confirmDelay));
 
-                if (fired) {
-                    await new Promise(r => setTimeout(r, confirmDelay));
-                    const urlChanged = location.href !== prevUrl;
-                    const after = checkStateAtPoint(sel, x, y);
-                    const success = urlChanged || after === 'notfound' || after === 'inactive';
-                    if (success) {
-                        status.textContent = '클릭 성공 감지 → 루프 종료.';
-                        clearLoopState();
-                        stopLoop();
-                        return;
-                    } else {
-                        status.textContent = '클릭 반응 없음 → 리로드 대기…';
-                    }
-                } else {
-                    status.textContent = '클릭 실패 → 리로드 대기…';
-                }
-            } else if (state === 'inactive') {
-                status.textContent = '버튼 비활성 → 리로드 대기…';
-            } else {
-                status.textContent = '버튼 미발견 → 리로드 대기…';
+            const urlChanged = location.href !== prevUrl;
+            const afterNode = document.elementFromPoint(x, y);
+            const nodeChanged = beforeNode !== afterNode && !!beforeNode; // 노드 변동 감지
+
+            if (fired && (urlChanged || nodeChanged)) {
+                status.textContent = '변화 감지(클릭 성공) → 루프 종료.';
+                clearLoopState();
+                if (stopAfter) stopLoop(); else stopLoop(); // 좌표 전용이라 항상 종료
+                return;
             }
+
+            status.textContent = fired ? '반응 없음 → 리로드 대기…' : '클릭 실패 → 리로드 대기…';
         } catch {
             status.textContent = '예외 발생 → 리로드 대기…';
         }
@@ -489,14 +351,15 @@ function ensureOverlayRuntime() {
         const reloadMs = parseInt($('#snReload').value || '250', 10);
         const jitterRt = parseFloat($('#snJitter').value || '0.25');
         const winSec = parseFloat($('#snWindow').value || '5');
-        const confirmDelay = Math.max(120, Math.min(1000, parseInt($('#snPostPause').value || '800', 10)));
-        const sel = ($('#snSelector').value || '').trim();
+        const confirmDelay = Math.max(80, Math.min(800, parseInt($('#snPostPause').value || '300', 10))); // 좌표 전용: 짧게
+        const stopAfter = $('#snStopOnClick').checked; // 사실 좌표 전용에선 true/false 상관 없이 성공 시 종료
+
         const x = parseFloat($('#snX').value);
         const y = parseFloat($('#snY').value);
 
-        // 좌표-잠금 전용: 선택자 + 좌표 모두 필요
-        if (!sel || !(isFinite(x) && isFinite(y))) {
-            status.innerHTML = '<span class="danger">좌표-잠금 모드: 선택자와 좌표(X,Y)를 모두 설정하세요.</span>';
+        // 좌표만 필요
+        if (!(isFinite(x) && isFinite(y))) {
+            status.innerHTML = '<span class="danger">좌표(X,Y)를 설정하세요.</span>';
             return;
         }
 
@@ -525,7 +388,7 @@ function ensureOverlayRuntime() {
         const endAt = target + Math.max(0, winSec) * 1000;
 
         // 루프 상태 최초 저장 & 첫 이터 실행
-        const cfg = { sel, x, y, reloadMs, jitterRt, endAt, confirmDelay, nextAt: Date.now() };
+        const cfg = { x, y, reloadMs, jitterRt, endAt, confirmDelay, nextAt: Date.now(), stopAfter };
         saveLoopState(cfg);
         await iterateOnce(cfg);
     }
