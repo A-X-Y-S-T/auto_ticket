@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build:win": "pkg . --targets node18-win-x64 --output dist/auto_ticket.exe"
   },
   "keywords": [],
   "author": "",
@@ -11,5 +12,9 @@
   "description": "",
   "dependencies": {
     "@playwright/test": "^1.54.2"
-  }
+  },
+  "devDependencies": {
+    "pkg": "^5.8.1"
+  },
+  "bin": "main.js"
 }
